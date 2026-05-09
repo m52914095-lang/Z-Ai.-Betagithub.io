@@ -7,8 +7,8 @@ on:
     # EDT = UTC-4, so 7:30 AM EDT = 11:30 AM UTC
     # We use 12:25 UTC which gives us 7:25 AM EST / 8:25 AM EDT
     # Combined with the random delay step, this ensures 7:30-7:32 AM EST window
-    - cron: "25 12 * * 6"   # Winter (EST): ~7:25 AM + delay → 7:30-7:32 AM
-    - cron: "25 11 * * 6"   # Summer (EDT): ~7:25 AM + delay → 7:30-7:32 AM
+    - cron: "25 12 * * 6" # Winter (EST): ~7:25 AM + delay → 7:30-7:32 AM
+    - cron: "25 11 * * 6" # Summer (EDT): ~7:25 AM + delay → 7:30-7:32 AM
   workflow_dispatch:
     inputs:
       mode:
@@ -36,8 +36,7 @@ on:
 jobs:
   upload-conan:
     runs-on: ubuntu-latest
-    timeout-minutes: 720  # 12 hour timeout for range processing
-
+    timeout-minutes: 720 # 12 hour timeout for range processing
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,14 +50,22 @@ jobs:
           echo "Waiting ${RANDOM_DELAY} seconds to spread across 7:30-7:32 AM EST window..."
           sleep ${RANDOM_DELAY}
 
+      # --- ADDED STEP ---
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v4 # Updated to v4 for modern best practices
+        with:
+          name: # optional, insert artifact name here
+          path: # optional, insert destination path here
+      # -----------------
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ffmpeg \
-            mkvtoolnix \
-            aria2 \
-            python3-pip
+          ffmpeg \
+          mkvtoolnix \
+          aria2 \
+          python3-pip
 
       - name: Install Python dependencies
         run: |
@@ -89,11 +96,3 @@ jobs:
         if: always()
         run: |
           rm -rf /tmp/conan_uploader 2>/dev/null || true
-                      - name: Download a Build Artifact
-  uses: actions/download-artifact@v3.1.0
-  with:
-    # Artifact name
-    name: # optional
-    # Destination path
-    path: # optional
-          
