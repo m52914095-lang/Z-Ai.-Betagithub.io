@@ -1,0 +1,91 @@
+name: Detective Conan Auto-Uploader
+
+on:
+  schedule:
+    # Runs every Saturday — targeting 7:30 AM EST
+    # EST = UTC-5, so 7:30 AM EST = 12:30 PM UTC
+    # EDT = UTC-4, so 7:30 AM EDT = 11:30 AM UTC
+    # We use 12:25 UTC which gives us 7:25 AM EST / 8:25 AM EDT
+    # Combined with the random delay step, this ensures 7:30-7:32 AM EST window
+    - cron: "25 12 * * 6"   # Winter (EST): ~7:25 AM + delay → 7:30-7:32 AM
+    - cron: "25 11 * * 6"   # Summer (EDT): ~7:25 AM + delay → 7:30-7:32 AM
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Episode selection mode'
+        required: false
+        default: 'latest'
+        type: choice
+        options:
+          - latest
+          - specific
+          - range
+      episode:
+        description: 'Specific episode number (for "specific" mode)'
+        required: false
+        default: ''
+      range_start:
+        description: 'Range start (for "range" mode)'
+        required: false
+        default: ''
+      range_end:
+        description: 'Range end (for "range" mode)'
+        required: false
+        default: ''
+
+jobs:
+  upload-conan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 720  # 12 hour timeout for range processing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Wait for 7:30 AM EST window
+        if: ${{ github.event_name == 'schedule' }}
+        run: |
+          # Calculate how long to wait until 7:30 AM EST (12:30 UTC in winter, 11:30 UTC in summer)
+          # Add a small random delay (0-120 seconds) to spread within the 7:30-7:32 window
+          RANDOM_DELAY=$((RANDOM % 120))
+          echo "Waiting ${RANDOM_DELAY} seconds to spread across 7:30-7:32 AM EST window..."
+          sleep ${RANDOM_DELAY}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            mkvtoolnix \
+            aria2 \
+            python3-pip
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Conan Uploader (auto latest)
+        if: ${{ github.event.inputs.mode == '' || github.event.inputs.mode == 'latest' }}
+        run: |
+          python3 conan_uploader.py
+        env:
+          TZ: "America/New_York"
+
+      - name: Run Conan Uploader (specific episode)
+        if: ${{ github.event.inputs.mode == 'specific' }}
+        run: |
+          python3 conan_uploader.py --episode ${{ github.event.inputs.episode }}
+        env:
+          TZ: "America/New_York"
+
+      - name: Run Conan Uploader (episode range)
+        if: ${{ github.event.inputs.mode == 'range' }}
+        run: |
+          python3 conan_uploader.py --range ${{ github.event.inputs.range_start }} ${{ github.event.inputs.range_end }}
+        env:
+          TZ: "America/New_York"
+
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          rm -rf /tmp/conan_uploader 2>/dev/null || true
