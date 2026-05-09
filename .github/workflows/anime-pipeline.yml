@@ -1,0 +1,176 @@
+name: AI Anime Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      anime_name:
+        description: 'Anime name to download (e.g. "Fullmetal Alchemist Brotherhood")'
+        required: true
+        type: string
+      type_filter:
+        description: 'Filter by type: tv, movie, ova, ona, special (leave empty for all)'
+        required: false
+        default: ''
+        type: string
+      episodes:
+        description: 'Episode range for TV (e.g. "1-25", leave empty for all)'
+        required: false
+        default: ''
+        type: string
+      quality:
+        description: 'Preferred quality (e.g. "1080p", leave empty for auto)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - '1080p'
+          - '720p'
+          - '480p'
+      skip_upload:
+        description: 'Skip uploading (download & process only)'
+        required: false
+        default: false
+        type: boolean
+      skip_hardsub:
+        description: 'Skip hardsub creation (faster, less CPU)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  anime-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440  # 24 hour timeout for large batches
+
+    steps:
+      # ── Step 0: Free disk space ──
+      - name: Maximize disk space by removing unneeded software
+        run: |
+          echo "=== Removing unneeded pre-installed software ==="
+          sudo apt-get update -qq
+          sudo apt-get remove -y --purge \
+            azure-cli \
+            dotnet-sdk-* \
+            firefox \
+            google-chrome-stable \
+            google-cloud-cli \
+            microsoft-edge-stable \
+            powershell \
+            temurin-* \
+            hhvm \
+            llvm-* \
+            php* \
+            ruby* \
+            racket* \
+            swift-* \
+            spotify-client \
+            || true
+          sudo apt-get autoremove -y --purge
+          sudo apt-get clean
+
+          echo "=== Removing large directories ==="
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+            /usr/lib/jvm /usr/local/lib/node_modules/webpack \
+            /opt/hostedtoolcache/CodeQL \
+            /opt/hostedtoolcache/go \
+            /opt/hostedtoolcache/PyPy \
+            /opt/hostedtoolcache/Ruby \
+            /opt/hostedtoolcache/sbt \
+            || true
+
+          echo "=== Disk space after cleanup ==="
+          df -h /
+          echo "Available: $(df -h / | tail -1 | awk '{print $4}')"
+
+      # ── Step 1: Checkout repository ──
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Step 2: Download previous results artifact ──
+      - name: Download previous pipeline results
+        uses: actions/download-artifact@v3.1.0
+        with:
+          name: anime-pipeline-results
+          path: ./previous-results
+        continue-on-error: true
+
+      # ── Step 3: Install system dependencies ──
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            ffmpeg \
+            mkvtoolnix \
+            aria2 \
+            python3-pip \
+            python3-venv
+
+      # ── Step 4: Install Python dependencies ──
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── Step 5: Run the anime pipeline ──
+      - name: Run Anime Pipeline
+        run: |
+          # Build command arguments
+          ARGS="--name '${{ github.event.inputs.anime_name }}'"
+
+          if [ -n "${{ github.event.inputs.type_filter }}" ]; then
+            ARGS="$ARGS --type-filter '${{ github.event.inputs.type_filter }}'"
+          fi
+
+          if [ -n "${{ github.event.inputs.episodes }}" ]; then
+            ARGS="$ARGS --episodes '${{ github.event.inputs.episodes }}'"
+          fi
+
+          if [ -n "${{ github.event.inputs.quality }}" ]; then
+            ARGS="$ARGS --quality '${{ github.event.inputs.quality }}'"
+          fi
+
+          if [ "${{ github.event.inputs.skip_upload }}" = "true" ]; then
+            ARGS="$ARGS --skip-upload"
+          fi
+
+          if [ "${{ github.event.inputs.skip_hardsub }}" = "true" ]; then
+            ARGS="$ARGS --skip-hardsub"
+          fi
+
+          echo "Running: python3 anime_pipeline.py $ARGS"
+          eval "python3 anime_pipeline.py $ARGS"
+        env:
+          AI: ${{ secrets.AI }}
+          STREAMP2P_API_KEY: "a7165e18e69dc32127258688"
+          DOODSTREAM_API_KEY: ${{ secrets.DOODSTREAM_API_KEY }}
+          LULUSTREAM_API_KEY: ${{ secrets.LULUSTREAM_API_KEY }}
+          STREAMTAPE_API_KEY: ${{ secrets.STREAMTAPE_API_KEY }}
+          DOODSTREAM_FOLDER_HS: ${{ secrets.DOODSTREAM_FOLDER_HS }}
+          DOODSTREAM_FOLDER_SS: ${{ secrets.DOODSTREAM_FOLDER_SS }}
+          TZ: "America/New_York"
+
+      # ── Step 6: Save pipeline results as artifact ──
+      - name: Save pipeline results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: anime-pipeline-results
+          path: |
+            ./previous-results
+            /tmp/anime_pipeline/output/
+          retention-days: 7
+          overwrite: true
+
+      # ── Step 7: Cleanup workspace ──
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          echo "=== Cleaning up workspace ==="
+          rm -rf /tmp/anime_pipeline/downloads 2>/dev/null || true
+          rm -rf /tmp/anime_pipeline/subtitles 2>/dev/null || true
+          # Keep output files for artifact upload
+          echo "=== Final disk usage ==="
+          du -sh /tmp/anime_pipeline/ 2>/dev/null || true
+          df -h /
